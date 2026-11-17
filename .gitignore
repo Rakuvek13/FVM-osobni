@@ -1,0 +1,35 @@
+# Build artifacts
+build/
+build_mpi/
+cmake-build-*/
+bin/
+lib/
+*.o
+*.a
+*.d
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+
+# LaTeX build intermediates (keep .tex and .pdf)
+*.aux
+*.log
+*.toc
+*.out
+*.xdv
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# Simulation outputs
+output/
+results/
+*.vti
+*.vtr
+*.vts
+*.vtu
+*.vtk
+*.pvd
+*.csv
