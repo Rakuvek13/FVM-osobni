@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
         else if (arg == "--out" && i + 1 < argc) out_dir = argv[++i];
     }
 
-    const auto schemes = solvers::parse_scheme_selection(scheme_arg);
+    const auto specs = solvers::parse_scheme_specs(scheme_arg);
 
     StructuredBoundaryConfig bc;
     bc.left.type = StructuredBCType::DirichletFaceAvg;
@@ -172,21 +172,26 @@ int main(int argc, char** argv) {
                   << ", ranks=" << mpi_guard.size() << ")\n";
     }
 
-    for (const auto scheme : schemes) {
+    for (const auto spec : specs) {
+        const auto scheme = spec.scheme;
         std::string scheme_label = "1st-Order";
         std::string scheme_tag = "first";
         time::RKMethod rk = time::RKMethod::Euler;
+        int eno_order = 3;
+        int weno_order = 5;
         if (scheme == solvers::ReconstructionScheme::TVD) {
             scheme_label = "TVD-mc";
             scheme_tag = "tvd";
             rk = time::RKMethod::SSP_RK2;
         } else if (scheme == solvers::ReconstructionScheme::ENO) {
-            scheme_label = "ENO3";
-            scheme_tag = "eno3";
-            rk = time::RKMethod::SSP_RK3;
+            eno_order = spec.order;
+            scheme_label = (eno_order == 2) ? "ENO2" : "ENO3";
+            scheme_tag = (eno_order == 2) ? "eno2" : "eno3";
+            rk = (eno_order == 2) ? time::RKMethod::SSP_RK2 : time::RKMethod::SSP_RK3;
         } else if (scheme == solvers::ReconstructionScheme::WENO) {
-            scheme_label = "WENO5-z";
-            scheme_tag = "weno5";
+            weno_order = spec.order;
+            scheme_label = (weno_order == 3) ? "WENO3-z" : "WENO5-z";
+            scheme_tag = (weno_order == 3) ? "weno3" : "weno5";
             rk = time::RKMethod::SSP_RK3;
         }
         if (is_root) {
@@ -204,12 +209,14 @@ int main(int argc, char** argv) {
 
             solvers::StructuredFVSolver solver(
                 mesh, bc, law, scheme,
-                solvers::TVDSlopeLimiter::MC, 3, solvers::WENOWeightType::WENO_Z, &decomp);
+                solvers::TVDSlopeLimiter::MC, eno_order, solvers::WENOWeightType::WENO_Z,
+                &decomp, weno_order);
 
             solvers::SolverRunOptions opts;
             opts.scheme = scheme;
             opts.tvd_limiter = solvers::TVDSlopeLimiter::MC;
-            opts.eno_order = 3;
+            opts.eno_order = eno_order;
+            opts.weno_order = weno_order;
             opts.weno_type = solvers::WENOWeightType::WENO_Z;
             opts.rk_method = rk;
             opts.cfl = cfl;

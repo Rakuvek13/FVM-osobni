@@ -3,7 +3,6 @@
 #include "fvm/core/field.hpp"
 #include "fvm/core/types.hpp"
 #include "fvm/mesh/structured_mesh.hpp"
-#include "fvm/mesh/unstructured_mesh.hpp"
 
 #include <string>
 #include <utility>
@@ -16,28 +15,12 @@ struct NamedScalarField {
     const StructuredField2D* field = nullptr;
 };
 
-struct UnstructuredScalarField {
-    std::string name;
-    const std::vector<Real>* data = nullptr;
-};
-
-struct UnstructuredVectorField {
-    std::string name;
-    const std::vector<Vec2>* data = nullptr;
-};
-
 /// Writes 2D structured cell-centered fields to VTK XML ImageData (.vti) for ParaView.
 void write_vti(const std::string& path,
                const StructuredMesh2D& mesh,
                const std::vector<NamedScalarField>& scalars);
 
-/// Writes 2D unstructured cell-centered scalar/vector fields to VTK XML UnstructuredGrid (.vtu).
-void write_vtu(const std::string& path,
-               const UnstructuredMesh2D& mesh,
-               const std::vector<UnstructuredScalarField>& scalars,
-               const std::vector<UnstructuredVectorField>& vectors = {});
-
-/// Writes a ParaView Data (.pvd) collection file indexing time-series .vti/.vtu snapshots.
+/// Writes a ParaView Data (.pvd) collection file indexing time-series .vti snapshots.
 class PvdWriter {
 public:
     explicit PvdWriter(std::string pvd_path);

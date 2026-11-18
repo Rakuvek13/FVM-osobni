@@ -12,15 +12,10 @@ if(FVM_USE_MPI)
 endif()
 
 add_library(fvm_core
-    src/linalg/dense.cpp
-    src/linalg/sparse.cpp
     src/mesh/geometry_exact.cpp
     src/mesh/structured_mesh.cpp
-    src/mesh/unstructured_mesh.cpp
-    src/mesh/mesh_generator.cpp
     src/io/vtk_writer.cpp
     src/solvers/structured_solver.cpp
-    src/solvers/unstructured_solver.cpp
 )
 
 target_include_directories(fvm_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -33,7 +28,7 @@ add_executable(problem1 apps/problem1_diagonal_band.cpp)
 target_link_libraries(problem1 PRIVATE fvm_core)
 target_compile_options(problem1 PRIVATE -Wall -Wextra -Wpedantic)
 
-add_executable(problem2 apps/problem2_unstructured_tube.cpp)
+add_executable(problem2 apps/problem2_smooth_rotation.cpp)
 target_link_libraries(problem2 PRIVATE fvm_core)
 target_compile_options(problem2 PRIVATE -Wall -Wextra -Wpedantic)
 

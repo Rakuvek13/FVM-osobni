@@ -50,18 +50,6 @@ Real polygon_area(const std::vector<Vec2>& poly) {
     return 0.5 * std::abs(twice_area);
 }
 
-Real intersection_area_box(const std::vector<Vec2>& poly,
-                           Real xmin, Real xmax, Real ymin, Real ymax) {
-    if (xmax <= xmin || ymax <= ymin) {
-        return 0.0;
-    }
-    auto clipped = clip_polygon_halfplane(poly, 1.0, 0.0, -xmin);   // x >= xmin
-    clipped = clip_polygon_halfplane(clipped, -1.0, 0.0, xmax);     // x <= xmax
-    clipped = clip_polygon_halfplane(clipped, 0.0, 1.0, -ymin);     // y >= ymin
-    clipped = clip_polygon_halfplane(clipped, 0.0, -1.0, ymax);     // y <= ymax
-    return polygon_area(clipped);
-}
-
 Real intersection_area_diagonal_band(const std::vector<Vec2>& poly, Real w) {
     if (w <= 0.0) {
         return 0.0;

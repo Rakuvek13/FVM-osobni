@@ -14,15 +14,10 @@ endif
 INCLUDES := -Iinclude
 
 CORE_SRCS := \
-	src/linalg/dense.cpp \
-	src/linalg/sparse.cpp \
 	src/mesh/geometry_exact.cpp \
 	src/mesh/structured_mesh.cpp \
-	src/mesh/unstructured_mesh.cpp \
-	src/mesh/mesh_generator.cpp \
 	src/io/vtk_writer.cpp \
-	src/solvers/structured_solver.cpp \
-	src/solvers/unstructured_solver.cpp
+	src/solvers/structured_solver.cpp
 
 CORE_OBJS := $(patsubst src/%.cpp,$(BUILD_DIR)/src/%.o,$(CORE_SRCS))
 CORE_LIB := $(BUILD_DIR)/libfvm_core.a
@@ -60,7 +55,7 @@ $(PROB1_BIN): apps/problem1_diagonal_band.cpp $(CORE_LIB)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(CORE_LIB) -o $@
 
-$(PROB2_BIN): apps/problem2_unstructured_tube.cpp $(CORE_LIB)
+$(PROB2_BIN): apps/problem2_smooth_rotation.cpp $(CORE_LIB)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(CORE_LIB) -o $@
 

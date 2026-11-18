@@ -12,10 +12,6 @@ std::vector<Vec2> clip_polygon_halfplane(const std::vector<Vec2>& poly, Real a, 
 /// Unsigned shoelace area of a simple 2D polygon.
 Real polygon_area(const std::vector<Vec2>& poly);
 
-/// Exact intersection area |poly \cap [xmin, xmax] x [ymin, ymax]|.
-Real intersection_area_box(const std::vector<Vec2>& poly,
-                           Real xmin, Real xmax, Real ymin, Real ymax);
-
 /// Exact intersection area |poly \cap {|y - x| <= w}|.
 Real intersection_area_diagonal_band(const std::vector<Vec2>& poly, Real w);
 

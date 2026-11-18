@@ -16,12 +16,6 @@ void ensure_parent_dir(const std::string& path) {
     }
 }
 
-int vtk_cell_type(Index num_vertices) {
-    if (num_vertices == 3) return 5;  // VTK_TRIANGLE
-    if (num_vertices == 4) return 9;  // VTK_QUAD
-    return 7;                         // VTK_POLYGON
-}
-
 }  // namespace
 
 void write_vti(const std::string& path,
@@ -69,105 +63,6 @@ void write_vti(const std::string& path,
     out << "      </CellData>\n";
     out << "    </Piece>\n";
     out << "  </ImageData>\n";
-    out << "</VTKFile>\n";
-}
-
-void write_vtu(const std::string& path,
-               const UnstructuredMesh2D& mesh,
-               const std::vector<UnstructuredScalarField>& scalars,
-               const std::vector<UnstructuredVectorField>& vectors) {
-    ensure_parent_dir(path);
-    std::ofstream out(path);
-    if (!out) {
-        throw std::runtime_error("write_vtu: failed to open " + path);
-    }
-
-    const Index n_cells = mesh.num_cells();
-    for (const auto& s : scalars) {
-        if (!s.data || s.data->size() != n_cells) {
-            throw std::invalid_argument("write_vtu: scalar field size mismatch");
-        }
-    }
-    for (const auto& v : vectors) {
-        if (!v.data || v.data->size() != n_cells) {
-            throw std::invalid_argument("write_vtu: vector field size mismatch");
-        }
-    }
-
-    out << std::setprecision(15);
-    out << "<?xml version=\"1.0\"?>\n";
-    out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
-    out << "  <UnstructuredGrid>\n";
-    out << "    <Piece NumberOfPoints=\"" << mesh.num_vertices()
-        << "\" NumberOfCells=\"" << n_cells << "\">\n";
-
-    // Points
-    out << "      <Points>\n";
-    out << "        <DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-    for (const auto& p : mesh.vertices()) {
-        out << "          " << p.x << ' ' << p.y << " 0\n";
-    }
-    out << "        </DataArray>\n";
-    out << "      </Points>\n";
-
-    // Cells
-    out << "      <Cells>\n";
-    out << "        <DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n";
-    for (const auto& cell : mesh.cells()) {
-        out << "         ";
-        for (Index vid : cell.vertex_ids) {
-            out << ' ' << vid;
-        }
-        out << '\n';
-    }
-    out << "        </DataArray>\n";
-
-    out << "        <DataArray type=\"Int64\" Name=\"offsets\" format=\"ascii\">\n         ";
-    Index offset = 0;
-    for (const auto& cell : mesh.cells()) {
-        offset += cell.vertex_ids.size();
-        out << ' ' << offset;
-    }
-    out << "\n        </DataArray>\n";
-
-    out << "        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n         ";
-    for (const auto& cell : mesh.cells()) {
-        out << ' ' << vtk_cell_type(cell.vertex_ids.size());
-    }
-    out << "\n        </DataArray>\n";
-    out << "      </Cells>\n";
-
-    // CellData
-    out << "      <CellData";
-    if (!scalars.empty()) {
-        out << " Scalars=\"" << scalars.front().name << "\"";
-    }
-    if (!vectors.empty()) {
-        out << " Vectors=\"" << vectors.front().name << "\"";
-    }
-    out << ">\n";
-
-    for (const auto& s : scalars) {
-        out << "        <DataArray type=\"Float64\" Name=\"" << s.name
-            << "\" NumberOfComponents=\"1\" format=\"ascii\">\n";
-        for (Index c = 0; c < n_cells; ++c) {
-            out << (*s.data)[c] << ((c + 1) % 8 == 0 || c + 1 == n_cells ? '\n' : ' ');
-        }
-        out << "        </DataArray>\n";
-    }
-
-    for (const auto& v : vectors) {
-        out << "        <DataArray type=\"Float64\" Name=\"" << v.name
-            << "\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-        for (Index c = 0; c < n_cells; ++c) {
-            out << "          " << (*v.data)[c].x << ' ' << (*v.data)[c].y << " 0\n";
-        }
-        out << "        </DataArray>\n";
-    }
-
-    out << "      </CellData>\n";
-    out << "    </Piece>\n";
-    out << "  </UnstructuredGrid>\n";
     out << "</VTKFile>\n";
 }
 

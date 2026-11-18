@@ -237,6 +237,66 @@ inline void weno5_gauss3(Real qm2, Real qm1, Real q0, Real qp1, Real qp2,
     u_g0 = sig_p * vp - sig_m * vm;
 }
 
+inline void weno3_unnorm_factors(Real b0, Real b1,
+                                 WENOWeightType wtype, Real eps,
+                                 Real& s0, Real& s1) {
+    if (wtype == WENOWeightType::WENO_Z) {
+        const Real tau3 = std::abs(b1 - b0);
+        const Real r0 = tau3 / (b0 + eps);
+        const Real r1 = tau3 / (b1 + eps);
+        s0 = 1.0 + r0 * r0;
+        s1 = 1.0 + r1 * r1;
+    } else {
+        const Real d0 = b0 + eps;
+        const Real d1 = b1 + eps;
+        s0 = 1.0 / (d0 * d0);
+        s1 = 1.0 / (d1 * d1);
+    }
+}
+
+/// Computes 3rd-order WENO3 left (+, i-1/2) and right (-, i+1/2) cell interface averages.
+inline void weno3_cell_faces(Real qm1, Real q0, Real qp1,
+                             WENOWeightType wtype, Real eps,
+                             Real& u_left_face, Real& u_right_face) {
+    const Real d0 = q0 - qm1;
+    const Real d1 = qp1 - q0;
+    const Real b0 = d0 * d0;
+    const Real b1 = d1 * d1;
+    Real s0 = 0.0, s1 = 0.0;
+    weno3_unnorm_factors(b0, b1, wtype, eps, s0, s1);
+
+    const Real pL0 = 0.5 * (qm1 + q0);
+    const Real pL1 = 0.5 * (3.0 * q0 - qp1);
+    const Real wL0 = 2.0 * s0;
+    const Real wL1 = s1;
+    u_left_face = (wL0 * pL0 + wL1 * pL1) / (wL0 + wL1);
+
+    const Real pR0 = 0.5 * (3.0 * q0 - qm1);
+    const Real pR1 = 0.5 * (q0 + qp1);
+    const Real wR0 = s0;
+    const Real wR1 = 2.0 * s1;
+    u_right_face = (wR0 * pR0 + wR1 * pR1) / (wR0 + wR1);
+}
+
+/// Evaluates 3rd-order WENO3 at the 2-point Gauss-Legendre nodes xi = +-1 / (2 sqrt(3))
+/// where optimal linear weights for the two 2-cell stencils are both 1/2.
+inline void weno3_gauss2(Real qm1, Real q0, Real qp1,
+                         WENOWeightType wtype, Real eps,
+                         Real& u_gm, Real& u_gp) {
+    const Real d0 = q0 - qm1;
+    const Real d1 = qp1 - q0;
+    const Real b0 = d0 * d0;
+    const Real b1 = d1 * d1;
+    Real s0 = 0.0, s1 = 0.0;
+    weno3_unnorm_factors(b0, b1, wtype, eps, s0, s1);
+
+    const Real c1 = (s0 * d0 + s1 * d1) / (s0 + s1);
+    static const Real kInv2Sqrt3 = 0.5 / std::sqrt(3.0);
+    const Real shift = c1 * kInv2Sqrt3;
+    u_gm = q0 - shift;
+    u_gp = q0 + shift;
+}
+
 }  // namespace
 
 StructuredConservationLaw make_linear_advection_law(Real ax, Real ay) {
@@ -261,7 +321,8 @@ StructuredFVSolver::StructuredFVSolver(const StructuredMesh2D& mesh,
                                        TVDSlopeLimiter limiter,
                                        int eno_order,
                                        WENOWeightType weno_type,
-                                       const mpi::CartDecomp2D* decomp)
+                                       const mpi::CartDecomp2D* decomp,
+                                       int weno_order)
     : mesh_(mesh),
       bc_(std::move(bc)),
       law_(std::move(law)),
@@ -269,6 +330,7 @@ StructuredFVSolver::StructuredFVSolver(const StructuredMesh2D& mesh,
       limiter_(limiter),
       eno_order_(eno_order),
       weno_type_(weno_type),
+      weno_order_(weno_order),
       decomp_(decomp) {
     if (scheme_ != ReconstructionScheme::FirstOrder &&
         scheme_ != ReconstructionScheme::TVD &&
@@ -279,13 +341,16 @@ StructuredFVSolver::StructuredFVSolver(const StructuredMesh2D& mesh,
     if (eno_order_ != 2 && eno_order_ != 3) {
         throw std::invalid_argument("StructuredFVSolver: eno_order must be 2 or 3");
     }
+    if (weno_order_ != 3 && weno_order_ != 5) {
+        throw std::invalid_argument("StructuredFVSolver: weno_order must be 3 or 5");
+    }
     Index required_ghost = 1;
     if (scheme_ == ReconstructionScheme::TVD) {
         required_ghost = 2;
     } else if (scheme_ == ReconstructionScheme::ENO) {
         required_ghost = static_cast<Index>(eno_order_);
     } else if (scheme_ == ReconstructionScheme::WENO) {
-        required_ghost = 3;
+        required_ghost = (weno_order_ == 3) ? 2 : 3;
     }
     if (mesh_.nghost() < required_ghost) {
         throw std::invalid_argument(
@@ -312,13 +377,18 @@ Real StructuredFVSolver::compute_rhs_weno5(const StructuredField2D& u,
     const Real inv_dx = 1.0 / dx;
     const Real inv_dy = 1.0 / dy;
     const bool use_weno = (scheme_ == ReconstructionScheme::WENO);
+    const bool use_weno5 = use_weno && (weno_order_ == 5);
+    const bool use_weno3 = use_weno && (weno_order_ == 3);
+    const SignedIndex pad = use_weno3 ? 1 : 2;
 
     const Real inv_2sqrt3 = 0.5 / std::sqrt(3.0);
     const Real xi_out3 = 0.1 * std::sqrt(15.0);
     const Real eps_x = (weno_type_ == WENOWeightType::WENO_Z)
-        ? std::max(1.0e-36, dx * dx * dx * dx) : 1.0e-6;
+        ? std::max(1.0e-36, use_weno3 ? (dx * dx) : (dx * dx * dx * dx))
+        : 1.0e-6;
     const Real eps_y = (weno_type_ == WENOWeightType::WENO_Z)
-        ? std::max(1.0e-36, dy * dy * dy * dy) : 1.0e-6;
+        ? std::max(1.0e-36, use_weno3 ? (dy * dy) : (dy * dy * dy * dy))
+        : 1.0e-6;
 
     auto eval_fx = [&](Real x, Real y, Real uL, Real uR) -> Real {
         const Real fL = law_.fx(x, y, uL);
@@ -339,19 +409,22 @@ Real StructuredFVSolver::compute_rhs_weno5(const StructuredField2D& u,
     const bool phys_top = !decomp_ || decomp_->on_physical_top();
     Real bnd_flux = 0.0;
 
-    // X-direction: 1D cell-face reconstruction along X for j in [-2, ny + 1], then Gauss along Y
-    const Index ny_pad = ny + 4;
+    // X-direction: 1D cell-face reconstruction along X for j in [-pad, ny - 1 + pad], then Gauss along Y
+    const Index ny_pad = ny + static_cast<Index>(2 * pad);
     std::vector<Real> face_L((nx + 1) * ny_pad, 0.0);
     std::vector<Real> face_R((nx + 1) * ny_pad, 0.0);
     for (Index jt = 0; jt < ny_pad; ++jt) {
-        const SignedIndex js = static_cast<SignedIndex>(jt) - 2;
+        const SignedIndex js = static_cast<SignedIndex>(jt) - pad;
         for (SignedIndex is = -1; is <= static_cast<SignedIndex>(nx); ++is) {
             Real u_left = 0.0;
             Real u_right = 0.0;
-            if (use_weno) {
+            if (use_weno5) {
                 weno5_cell_faces(u(is - 2, js), u(is - 1, js), u(is, js),
                                  u(is + 1, js), u(is + 2, js), weno_type_, eps_x,
                                  u_left, u_right);
+            } else if (use_weno3) {
+                weno3_cell_faces(u(is - 1, js), u(is, js), u(is + 1, js),
+                                 weno_type_, eps_x, u_left, u_right);
             } else {
                 eno3_cell_faces(u(is - 2, js), u(is - 1, js), u(is, js),
                                 u(is + 1, js), u(is + 2, js), u_left, u_right);
@@ -374,11 +447,11 @@ Real StructuredFVSolver::compute_rhs_weno5(const StructuredField2D& u,
         const Real* colL = &face_L[i * ny_pad];
         const Real* colR = &face_R[i * ny_pad];
         for (Index j = 0; j < ny; ++j) {
-            const Index jt = j + 2;
+            const Index jt = j + static_cast<Index>(pad);
             const SignedIndex js = static_cast<SignedIndex>(j);
             const Vec2 xf = mesh_.x_face_center(i, j);
             Real F = 0.0;
-            if (use_weno) {
+            if (use_weno5) {
                 Real uLm = 0.0, uL0 = 0.0, uLp = 0.0;
                 Real uRm = 0.0, uR0 = 0.0, uRp = 0.0;
                 weno5_gauss3(colL[jt - 2], colL[jt - 1], colL[jt], colL[jt + 1], colL[jt + 2],
@@ -388,6 +461,12 @@ Real StructuredFVSolver::compute_rhs_weno5(const StructuredField2D& u,
                 F = w_g3_out * eval_fx(xf.x, xf.y - y_off3, uLm, uRm)
                   + w_g3_mid * eval_fx(xf.x, xf.y, uL0, uR0)
                   + w_g3_out * eval_fx(xf.x, xf.y + y_off3, uLp, uRp);
+            } else if (use_weno3) {
+                Real uLm = 0.0, uLp = 0.0, uRm = 0.0, uRp = 0.0;
+                weno3_gauss2(colL[jt - 1], colL[jt], colL[jt + 1], weno_type_, eps_y, uLm, uLp);
+                weno3_gauss2(colR[jt - 1], colR[jt], colR[jt + 1], weno_type_, eps_y, uRm, uRp);
+                F = 0.5 * (eval_fx(xf.x, xf.y - y_off2, uLm, uRm)
+                         + eval_fx(xf.x, xf.y + y_off2, uLp, uRp));
             } else {
                 Real uLm = 0.0, uLp = 0.0, uRm = 0.0, uRp = 0.0;
                 eno3_gauss2(colL[jt - 2], colL[jt - 1], colL[jt], colL[jt + 1], colL[jt + 2], uLm, uLp);
@@ -409,19 +488,22 @@ Real StructuredFVSolver::compute_rhs_weno5(const StructuredField2D& u,
         }
     }
 
-    // Y-direction: 1D cell-face reconstruction along Y for i in [-2, nx + 1], then Gauss along X
-    const Index nx_pad = nx + 4;
+    // Y-direction: 1D cell-face reconstruction along Y for i in [-pad, nx - 1 + pad], then Gauss along X
+    const Index nx_pad = nx + static_cast<Index>(2 * pad);
     face_L.assign((ny + 1) * nx_pad, 0.0);
     face_R.assign((ny + 1) * nx_pad, 0.0);
     for (Index it = 0; it < nx_pad; ++it) {
-        const SignedIndex is = static_cast<SignedIndex>(it) - 2;
+        const SignedIndex is = static_cast<SignedIndex>(it) - pad;
         for (SignedIndex js = -1; js <= static_cast<SignedIndex>(ny); ++js) {
             Real u_left = 0.0;
             Real u_right = 0.0;
-            if (use_weno) {
+            if (use_weno5) {
                 weno5_cell_faces(u(is, js - 2), u(is, js - 1), u(is, js),
                                  u(is, js + 1), u(is, js + 2), weno_type_, eps_y,
                                  u_left, u_right);
+            } else if (use_weno3) {
+                weno3_cell_faces(u(is, js - 1), u(is, js), u(is, js + 1),
+                                 weno_type_, eps_y, u_left, u_right);
             } else {
                 eno3_cell_faces(u(is, js - 2), u(is, js - 1), u(is, js),
                                 u(is, js + 1), u(is, js + 2), u_left, u_right);
@@ -442,11 +524,11 @@ Real StructuredFVSolver::compute_rhs_weno5(const StructuredField2D& u,
         const Real* rowL = &face_L[j * nx_pad];
         const Real* rowR = &face_R[j * nx_pad];
         for (Index i = 0; i < nx; ++i) {
-            const Index it = i + 2;
+            const Index it = i + static_cast<Index>(pad);
             const SignedIndex is = static_cast<SignedIndex>(i);
             const Vec2 yf = mesh_.y_face_center(i, j);
             Real G = 0.0;
-            if (use_weno) {
+            if (use_weno5) {
                 Real uLm = 0.0, uL0 = 0.0, uLp = 0.0;
                 Real uRm = 0.0, uR0 = 0.0, uRp = 0.0;
                 weno5_gauss3(rowL[it - 2], rowL[it - 1], rowL[it], rowL[it + 1], rowL[it + 2],
@@ -456,6 +538,12 @@ Real StructuredFVSolver::compute_rhs_weno5(const StructuredField2D& u,
                 G = w_g3_out * eval_fy(yf.x - x_off3, yf.y, uLm, uRm)
                   + w_g3_mid * eval_fy(yf.x, yf.y, uL0, uR0)
                   + w_g3_out * eval_fy(yf.x + x_off3, yf.y, uLp, uRp);
+            } else if (use_weno3) {
+                Real uLm = 0.0, uLp = 0.0, uRm = 0.0, uRp = 0.0;
+                weno3_gauss2(rowL[it - 1], rowL[it], rowL[it + 1], weno_type_, eps_x, uLm, uLp);
+                weno3_gauss2(rowR[it - 1], rowR[it], rowR[it + 1], weno_type_, eps_x, uRm, uRp);
+                G = 0.5 * (eval_fy(yf.x - x_off2, yf.y, uLm, uRm)
+                         + eval_fy(yf.x + x_off2, yf.y, uLp, uRp));
             } else {
                 Real uLm = 0.0, uLp = 0.0, uRm = 0.0, uRp = 0.0;
                 eno3_gauss2(rowL[it - 2], rowL[it - 1], rowL[it], rowL[it + 1], rowL[it + 2], uLm, uLp);

@@ -74,6 +74,11 @@ inline TVDSlopeLimiter parse_tvd_limiter(const std::string& s) {
     throw std::invalid_argument("Unknown TVD slope limiter: " + s);
 }
 
+struct SchemeSpec {
+    ReconstructionScheme scheme = ReconstructionScheme::FirstOrder;
+    int order = 1;  // 1 (FirstOrder), 2 (TVD), 2 or 3 (ENO), 3 or 5 (WENO)
+};
+
 inline std::vector<ReconstructionScheme> parse_scheme_selection(const std::string& s) {
     if (s == "first" || s == "1st") return {ReconstructionScheme::FirstOrder};
     if (s == "tvd" || s == "2nd") return {ReconstructionScheme::TVD};
@@ -84,6 +89,28 @@ inline std::vector<ReconstructionScheme> parse_scheme_selection(const std::strin
                 ReconstructionScheme::TVD,
                 ReconstructionScheme::ENO,
                 ReconstructionScheme::WENO};
+    }
+    throw std::invalid_argument("Unknown scheme selection: " + s);
+}
+
+inline std::vector<SchemeSpec> parse_scheme_specs(const std::string& s) {
+    if (s == "first" || s == "1st") return {{ReconstructionScheme::FirstOrder, 1}};
+    if (s == "tvd" || s == "2nd") return {{ReconstructionScheme::TVD, 2}};
+    if (s == "eno2") return {{ReconstructionScheme::ENO, 2}};
+    if (s == "eno3") return {{ReconstructionScheme::ENO, 3}};
+    if (s == "eno") return {{ReconstructionScheme::ENO, 2}, {ReconstructionScheme::ENO, 3}};
+    if (s == "weno3") return {{ReconstructionScheme::WENO, 3}};
+    if (s == "weno5") return {{ReconstructionScheme::WENO, 5}};
+    if (s == "weno") return {{ReconstructionScheme::WENO, 3}, {ReconstructionScheme::WENO, 5}};
+    if (s == "all") {
+        return {
+            {ReconstructionScheme::FirstOrder, 1},
+            {ReconstructionScheme::TVD, 2},
+            {ReconstructionScheme::ENO, 2},
+            {ReconstructionScheme::ENO, 3},
+            {ReconstructionScheme::WENO, 3},
+            {ReconstructionScheme::WENO, 5}
+        };
     }
     throw std::invalid_argument("Unknown scheme selection: " + s);
 }
@@ -111,6 +138,7 @@ struct SolverRunOptions {
     ReconstructionScheme scheme = ReconstructionScheme::FirstOrder;
     TVDSlopeLimiter tvd_limiter = TVDSlopeLimiter::MC;
     int eno_order = 3;
+    int weno_order = 5;
     WENOWeightType weno_type = WENOWeightType::WENO_Z;
     time::RKMethod rk_method = time::RKMethod::Euler;
     Real cfl = 0.45;
@@ -141,11 +169,13 @@ public:
                        TVDSlopeLimiter limiter = TVDSlopeLimiter::MC,
                        int eno_order = 3,
                        WENOWeightType weno_type = WENOWeightType::WENO_Z,
-                       const mpi::CartDecomp2D* decomp = nullptr);
+                       const mpi::CartDecomp2D* decomp = nullptr,
+                       int weno_order = 5);
 
     ReconstructionScheme scheme() const { return scheme_; }
     TVDSlopeLimiter limiter() const { return limiter_; }
     int eno_order() const { return eno_order_; }
+    int weno_order() const { return weno_order_; }
     WENOWeightType weno_type() const { return weno_type_; }
     const mpi::CartDecomp2D* mpi_decomp() const { return decomp_; }
 
@@ -178,6 +208,7 @@ private:
     TVDSlopeLimiter limiter_;
     int eno_order_;
     WENOWeightType weno_type_;
+    int weno_order_;
     const mpi::CartDecomp2D* decomp_ = nullptr;
     mutable mpi::HaloScratch halo_scratch_;
 };

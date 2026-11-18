@@ -1,30 +1,24 @@
-# 2D Finite Volume Method (FVM) Solver Suite
+# 2D Structured Finite Volume Method (FVM) Solver Suite
 
-A self-contained C++20 library and benchmark suite for **2D scalar conservation laws** on structured Cartesian grids and unstructured triangular meshes. With zero external PDE or linear-algebra dependencies in the serial build, it compares four finite-volume reconstruction families—**1st-order monotone**, **2nd-order TVD**, **3rd-order ENO**, and **WENO**—with optional OpenMPI domain decomposition and native ParaView XML output.
+A self-contained C++20 library and benchmark suite for **2D scalar conservation laws** on structured Cartesian grids. With zero external PDE dependencies in the serial build, it compares **six finite-volume reconstruction schemes**—**1st-Order monotone**, **2nd-Order TVD (MUSCL)**, **2nd-Order ENO (`ENO2`)**, **3rd-Order ENO (`ENO3`)**, **3rd-Order WENO (`WENO3`)**, and **5th-Order WENO (`WENO5`)**—with optional OpenMPI domain decomposition and native ParaView XML (`.vti` / `.pvd`) output.
 
 ---
 
 ## Features
 
-- **Four Reconstruction Families with SSP Time Integration:**
-  - **Structured Cartesian grids (`StructuredFVSolver`):**
-    - `1st-Order` upwind / global Rusanov with Forward Euler
-    - `TVD` piecewise-linear MUSCL (`minmod`, `mc`, `vanleer`, `superbee`) with `SSP-RK2`
-    - `ENO3` Newton divided-difference reconstruction with 2-point Gauss face quadrature and `SSP-RK3` (`ENO2` + `SSP-RK2` also available in the library)
-    - `WENO5` (WENO-Z and WENO-JS) with 3-point Gauss face quadrature and Shi–Hu–Shu negative-weight splitting (`SSP-RK3`)
-  - **Unstructured triangular meshes (`UnstructuredAdvectionSolver`):**
-    - `1st-Order` piecewise-constant upwind with Forward Euler
-    - `TVD` distance-weighted least-squares linear reconstruction (`Barth–Jespersen` and `Venkatakrishnan` limiters) with `SSP-RK2`
-    - `ENO3` $P^2$ quadratic polynomial reconstruction over central + directional $60^\circ$ sector stencils with `SSP-RK3`
-    - `WENO` $P^2$ weighted combination of central and directional sector polynomials (`WENO_Z` / `WENO_JS`) with `SSP-RK3`
+- **Six Reconstruction Schemes with SSP / Explicit RK Time Integration (`StructuredFVSolver`):**
+  - `1st-Order`: piecewise-constant upwind / Rusanov with Forward Euler (`nghost = 1`)
+  - `TVD`: piecewise-linear MUSCL (`minmod`, `mc`, `vanleer`, `superbee`) with `SSP-RK2` (`nghost = 2`)
+  - `ENO2`: 2nd-order adaptive slope reconstruction with 1-point face flux and `SSP-RK2` (`nghost = 2`)
+  - `ENO3`: 3rd-order Newton divided-difference reconstruction with 2-point Gauss face quadrature and `SSP-RK3` (`nghost = 3`)
+  - `WENO3`: 3rd-order `WENO-Z` / `WENO-JS` reconstruction (`r = 2`, critical-point scale $\varepsilon = \Delta x^2$ for `WENO-Z`) with 2-point Gauss face quadrature and `SSP-RK3` (`nghost = 2`)
+  - `WENO5`: 5th-order `WENO-Z` / `WENO-JS` reconstruction (`r = 3`, $\varepsilon = \Delta x^4$ for `WENO-Z`) with 3-point Gauss face quadrature and Shi–Hu–Shu negative-weight splitting (`SSP-RK3` or `RK4`, `nghost = 3`)
 - **Self-Contained Numerics & Geometry:**
-  - Dense LU and rank/condition-checked Householder QR (`include/fvm/linalg/dense.hpp`)
-  - CSR sparse matrices with Jacobi/SGS-preconditioned CG and BiCGSTAB (`include/fvm/linalg/sparse.hpp`)
   - Exact geometric cell-average initialization via polygon half-plane clipping and disk–rectangle overlap (`include/fvm/mesh/geometry_exact.hpp`)
-  - Built-in Bowyer–Watson Delaunay triangle generator with Lloyd smoothing, 1-to-4 uniform refinement, and Gmsh v2.2 reader (`include/fvm/mesh/`)
-  - Butcher-weight-aware discrete conservation residual $R_M^n$ monitored per time step
-- **Optional OpenMPI Parallelism:** Compile-time MPI support (`USE_MPI=1` / `-DFVM_USE_MPI=ON`) with 2D Cartesian halo exchanges (including diagonal corners) and centroid-partitioned unstructured halo schedules, matching serial solutions to roundoff precision.
-- **ParaView & CSV Output:** Native `.vti`, `.vtu`, and `.pvd` time series alongside CSV convergence tables and 1D profile slices.
+  - 1D Gauss–Legendre quadrature ($n \in \{1,\dots,5\}$) and tensor-product smooth cell-average initialization (`include/fvm/numerics/quadrature.hpp`)
+  - Butcher-weight-aware discrete conservation residual $R_M^n$ monitored per time step (`include/fvm/numerics/time_integrator.hpp`)
+- **Optional OpenMPI Parallelism:** Compile-time MPI support (`USE_MPI=1` / `-DFVM_USE_MPI=ON`) with 2D Cartesian sequential X-then-Y halo exchanges (populating diagonal corners automatically), matching serial solutions to roundoff precision (`< 1e-14`).
+- **ParaView & CSV Output:** Native `.vti` and `.pvd` time series alongside CSV convergence tables and 1D profile slices.
 
 ---
 
@@ -33,7 +27,7 @@ A self-contained C++20 library and benchmark suite for **2D scalar conservation 
 ### Prerequisites
 - C++20 compiler (`clang++` or `g++`)
 - GNU `make` or `cmake` ($\ge 3.16$)
-- **Optional:** MPI (`mpicxx` and `mpiexec`, e.g. OpenMPI) for distributed execution; [ParaView](https://www.paraview.org/) for visualizing `.pvd`/`.vti`/`.vtu` outputs
+- **Optional:** MPI (`mpicxx` and `mpiexec`, e.g. OpenMPI) for distributed execution; [ParaView](https://www.paraview.org/) for visualizing `.pvd`/`.vti` outputs
 
 ### Build with `make`
 
@@ -66,14 +60,16 @@ mpiexec -n 4 ./build_mpi/test_solvers
 
 ## Solver Overview
 
-| Family | Structured Grid | Unstructured Triangles | Time Integrator |
-|---|---|---|---|
-| `1st-Order` | Piecewise constant, 1-pt face flux | Piecewise constant, 1-pt face flux | Forward Euler |
-| `TVD` | Dimension-by-dimension limited slope | Least-squares $\nabla u_c$ (Householder QR) + vertex limiter | `SSP-RK2` |
-| `ENO3` | 3-cell Newton divided-difference + 2-pt Gauss face quadrature | Central + $60^\circ$ directional $P^2$ stencils + 3-pt Gauss edge quadrature | `SSP-RK3` |
-| `WENO` | 5th-order WENO-Z/JS + 3-pt Gauss face quadrature (Shi–Hu–Shu splitting) | Convexly weighted $P^2$ central + sector polynomials (`WENO_Z` / `WENO_JS`) | `SSP-RK3` |
+| Scheme | Spatial Reconstruction | Face Quadrature | Required `nghost` | Time Integrator |
+|---|---|---|---|---|
+| `1st-Order` | Piecewise constant | 1-pt midpoint | 1 | Forward Euler |
+| `TVD` | Limited linear slope (`MC` / `Minmod` / `VanLeer` / `Superbee`) | 1-pt midpoint | 2 | `SSP-RK2` |
+| `ENO2` | 2-cell adaptive linear slope | 1-pt midpoint | 2 | `SSP-RK2` |
+| `ENO3` | 3-cell Newton divided-difference quadratic | 2-pt Gauss–Legendre | 3 | `SSP-RK3` |
+| `WENO3` | 3rd-order `WENO-Z` / `WENO-JS` ($r=2$, $\varepsilon_{\text{Z}} = \Delta x^2$) | 2-pt Gauss–Legendre | 2 | `SSP-RK3` |
+| `WENO5` | 5th-order `WENO-Z` / `WENO-JS` ($r=3$, Shi–Hu–Shu splitting) | 3-pt Gauss–Legendre | 3 | `SSP-RK3` / `RK4` |
 
-Smooth formal convergence orders (2nd-order `TVD`, 3rd-order `ENO3`, 5th-order structured `WENO5-Z`, and 3rd-order unstructured $P^2$ `WENO-Z`) are verified on linear and nonlinear smooth test cases in [tests/test_solvers.cpp](tests/test_solvers.cpp). The benchmark drivers focus on sharp discontinuities and nonconvex wave structures where diffusion, limiters, mesh geometry, and entropy effects compete.
+Smooth formal convergence orders (`TVD`, `ENO2`, `ENO3`, `WENO3-Z`, `WENO3-JS`, `WENO5-Z`) and 4-rank MPI pointwise equivalence are verified in [tests/test_solvers.cpp](tests/test_solvers.cpp).
 
 ---
 
@@ -82,60 +78,60 @@ Smooth formal convergence orders (2nd-order `TVD`, 3rd-order `ENO3`, 5th-order s
 ### 1. Diagonal Band Advection (`problem1`)
 - **Equation & Domain:** $u_t + u_x + u_y = 0$ on $(0,1)^2$, $T = 1.0$, $\mathrm{CFL} = 0.45$, grids $N \in \{40, 80, 160, 320\}$.
 - **Setup:** Stationary $45^\circ$ contact band $u_0(x,y) = \mathbf{1}_{\{|y-x| < 0.2\}}$ initialized via exact cell-area intersection, exact inflow face averages on $x=0$ and $y=0$, and zero-gradient outflow on $x=1, y=1$.
-- **Variants:** `1st-Order`, `TVD-mc`, `ENO3`, `WENO5-z`.
-- **What it tests:** Cross-wind numerical viscosity on non-grid-aligned discontinuities. Asymptotically across a linear contact discontinuity, a $p$-th order scheme scales in $L^1$ as $h^{p/(p+1)}$ ($0.50$, $0.67$, $0.83$). At $320^2$, `WENO5-z` narrows the 10–90% front width to `0.0119` (vs. `0.0907` for `1st-Order`), while `TVD-mc` stays strictly within $[0, 1]$ (`max_RM <= 1.9e-14` across all runs).
+- **Variants:** `1st-Order`, `TVD-mc`, `ENO2`, `ENO3`, `WENO3-z`, `WENO5-z`.
+- **What it tests:** Cross-wind numerical diffusion on non-grid-aligned discontinuities. Asymptotically across a linear contact discontinuity, a $p$-th order scheme scales in $L^1$ as $h^{p/(p+1)}$. At $320^2$, `WENO5-z` narrows the 10–90% front width to `0.01187` (vs. `0.09073` for `1st-Order`), while compressive `TVD-mc` (`0.01701`) remains strictly within $[0, 1]$ and outperforms `ENO2`, `ENO3`, and `WENO3-z` on the pure jump (`max_RM <= 1.91e-14` across all runs).
 
 <details>
-<summary>Representative convergence metrics on 40² → 320²</summary>
+<summary>4-rank MPI convergence metrics on 40² → 320²</summary>
 
-| Scheme | $L^1$ ($320^2$) | `EOC_1` | $L^2$ ($320^2$) | $d_{10\text{--}90}(x+y=1)$ | Bounds $[u_{\min}, u_{\max}]$ |
-|---|---:|---:|---:|---:|---|
-| `1st-Order` | `5.78e-02` | `0.47` | `1.28e-01` | `0.0907` | `[8.6e-78, 1]` |
-| `TVD-mc` | `8.38e-03` | `0.68` | `4.69e-02` | `0.0170` | `[0, 1]` |
-| `ENO3` | `1.06e-02` | `0.67` | `4.91e-02` | `0.0200` | `[1.1e-170, 1]` |
-| `WENO5-z` | `5.34e-03` | `0.78` | `3.27e-02` | `0.0119` | `[-1.5e-06, 1]` |
+| Scheme | $L^1$ ($320^2$) | `EOC_1` | $L^2$ ($320^2$) | $d_{10\text{--}90}(x+y=1)$ | Bounds $[u_{\min}, u_{\max}]$ | Time (s) |
+|---|---:|---:|---:|---:|---|---:|
+| `1st-Order` | `5.78e-02` | `0.47` | `1.28e-01` | `0.09073` | `[8.6e-78, 1]` | `1.264` |
+| `TVD-mc` | `8.38e-03` | `0.68` | `4.69e-02` | `0.01701` | `[0, 1]` | `1.847` |
+| `ENO2` | `1.80e-02` | `0.60` | `6.62e-02` | `0.03115` | `[2.0e-133, 1]` | `1.734` |
+| `ENO3` | `1.06e-02` | `0.67` | `4.91e-02` | `0.01997` | `[1.1e-170, 1]` | `4.706` |
+| `WENO3-z` | `1.12e-02` | `0.72` | `5.13e-02` | `0.02074` | `[-2.27e-03, 1.0026]` | `5.217` |
+| `WENO5-z` | `5.34e-03` | `0.78` | `3.27e-02` | `0.01187` | `[-1.48e-06, 1]` | `8.967` |
 
 </details>
 
-### 2. Unstructured Tube Transport (`problem2`)
-- **Equation & Domain:** $u_t + u_x = 0$ on $\Omega = (0,4)\times(0,1)$, $T = 2.0$, $\mathrm{CFL} = 0.45$, zero inflow at $x=0$.
-- **Setup:** Discontinuous square patch $S_0 = [0.5, 1.0]\times[0.25, 0.75]$ advected to $S(T) = [2.5, 3.0]\times[0.25, 0.75]$. Evaluated on four unstructured levels (`264` to `16,896` triangles) under two mesh-generation modes:
-  - `--mesh nested` (default): Lloyd-smoothed Delaunay base mesh refined self-similarly 1-to-4 ($q_{\min} = 0.815$).
-  - `--mesh irregular`: independent unsmoothed Delaunay triangulation at every refinement level ($q_{\min} = 0.699 \to 0.566$).
-- **Variants:** `1st-Tri`, `TVD-Tri` (`Barth–Jespersen`), `ENO3-Tri`, `WENO-Tri` ($P^2$ `WENO_Z`).
-- **What it tests:** Cross-stream leakage (mass escaping $y \in [0.25, 0.75]$) vs. streamwise spill under triangle orientation bias and mesh irregularity. Without smoothing or nested refinement (`--mesh irregular`), cross-stream leakage increases substantially (`5.8x` for `1st-Tri`, `2.65x` for `WENO-Tri` at `16,896` cells), yet Householder QR stencil checks keep $P^2$ `ENO3` and `WENO` well-conditioned and mass-conservative (`max_RM <= 2.2e-15`).
+### 2. Smooth Solid-Body Rotation of a Modulated Wave Packet (`problem2`)
+- **Equation & Domain:** $u_t + \partial_x(-2\pi(y - 0.5)u) + \partial_y(2\pi(x - 0.5)u) = 0$ on $(0,1)^2$, $T = 1.0$ (one full $360^\circ$ revolution), $\mathrm{CFL} = 0.45$, grids $N \in \{40, 80, 160, 320\}$.
+- **Setup:** Off-center Gaussian-modulated cosine packet $u_0(x,y) = \exp\!\bigl(-((x-0.5)^2 + (y-0.7)^2)/(2\sigma^2)\bigr)\cos(k(x-0.5))$ with $\sigma = 0.06$, $k = 6\pi$, initialized via 5-point Gauss cell averages with `DirichletCellAvg` boundary conditions.
+- **Variants:** `1st-Order` (`Euler`), `TVD-mc` (`SSP-RK2`), `ENO2` (`SSP-RK2`), `ENO3` (`SSP-RK3`), `WENO3-z` (`SSP-RK3`), `WENO5-z` (`RK4`).
+- **What it tests:** Genuine smooth high-order accuracy, peak-amplitude retention across multiple extrema, and work–precision efficiency. `WENO5-z` at **$80^2$** (`L^1 = 3.15e-04`, `1.04 s`) already beats `TVD-mc` at **$320^2$** (`L^1 = 3.37e-04`, `8.81 s`) in $8.5\times$ less runtime, and `WENO5-z` at **$160^2$** (`L^1 = 1.52e-05`, `6.49 s`) beats both `ENO3` (`6.12e-05`, `18.88 s`) and `WENO3-z` (`1.31e-04`, `19.04 s`) at **$320^2$** (`max_RM <= 4.55e-16` across all runs).
 
 <details>
-<summary>Representative patch results at finest level (ref = 3, 16,896 triangles)</summary>
+<summary>4-rank MPI convergence metrics on 40² → 320²</summary>
 
-| Mesh Mode | Scheme | Tri $L^1$ | `EOC_1` | Cross leak | Stream spill | Bounds $[u_{\min}, u_{\max}]$ |
-|---|---|---:|---:|---:|---:|---|
-| `nested` | `1st-Tri` | `1.03e-01` | `0.44` | `4.90e-03` | `4.96e-02` | `[0, 0.952]` |
-| `nested` | `TVD-Tri` | `3.42e-02` | `0.69` | `3.71e-03` | `1.65e-02` | `[-5.9e-14, 1]` |
-| `nested` | `ENO3-Tri` | `3.11e-02` | `0.69` | `3.66e-03` | `1.50e-02` | `[-0.0029, 1.0089]` |
-| `nested` | `WENO-Tri` | `3.02e-02` | `0.67` | `3.70e-03` | `1.46e-02` | `[-0.0038, 1.0040]` |
-| `irregular` | `1st-Tri` | `1.49e-01` | `0.45` | `2.84e-02` | `4.91e-02` | `[0, 0.927]` |
-| `irregular` | `TVD-Tri` | `4.63e-02` | `0.72` | `1.05e-02` | `1.59e-02` | `[-4.4e-14, 1]` |
-| `irregular` | `ENO3-Tri` | `4.20e-02` | `0.75` | `9.88e-03` | `1.43e-02` | `[-3.3e-07, 1.0001]` |
-| `irregular` | `WENO-Tri` | `4.15e-02` | `0.76` | `9.81e-03` | `1.41e-02` | `[-0.00042, 1.0006]` |
+| Scheme | $L^1$ ($80^2$) | $L^1$ ($160^2$) | $L^1$ ($320^2$) | `EOC_1` ($320^2$) | $L^\infty$ ($320^2$) | $R_{\text{peak}}$ ($320^2$) | Time ($320^2$, s) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `1st-Order` | `1.66e-02` | `1.30e-02` | `9.35e-03` | `0.48` | `5.47e-01` | `0.4639` | `4.330` |
+| `TVD-mc` | `3.30e-03` | `1.13e-03` | `3.37e-04` | `1.75` | `3.25e-02` | `0.9729` | `8.814` |
+| `ENO2` | `7.80e-03` | `3.04e-03` | `9.36e-04` | `1.70` | `1.28e-01` | `0.8731` | `7.681` |
+| `ENO3` | `2.09e-03` | `3.47e-04` | `6.12e-05` | `2.51` | `4.43e-03` | `0.9972` | `18.876` |
+| `WENO3-z` | `4.51e-03` | `9.09e-04` | `1.31e-04` | `2.80` | `4.24e-02` | `0.9584` | `19.035` |
+| `WENO5-z` | `3.15e-04` | `1.52e-05` | `2.58e-07` | `5.88` | `1.91e-05` | `0.999989` | `45.362` |
 
 </details>
 
 ### 3. Kurganov–Petrova–Popov (KPP) Rotating Wave (`problem3`)
-- **Equation & Domain:** Nonconvex scalar conservation law $u_t + (\sin u)_x + (\cos u)_y = 0$ on $(-2.5, 2.5)^2$, $T = 1.0$, $\mathrm{CFL} = 0.45$, global Rusanov flux ($\alpha = 1$), grids $N \in \{100, 200, 400, 800\}$.
-- **Setup:** $u_0 = \frac{7\pi}{2}$ inside $\{x^2+y^2 \le 1\}$ (exact disk–cell area fractions), $u_0 = \frac{\pi}{4}$ outside and on all boundaries. Because no closed-form elementary analytical solution exists in 2D at $T=1$, solutions are benchmarked against a cell-averaged restriction of a $1600 \times 1600$ 1st-order monotone Rusanov reference.
-- **Variants:** `1st-Order`, `TVD-minmod`, `ENO3`, `WENO5-z`.
-- **What it tests:** Nonconvex composite-wave entropy stability. Because $\sin u$ and $\cos u$ change convexity across $[\pi/4, 7\pi/2]$, low-dissipation dimension-by-dimension high-order reconstructions (`ENO3`, `WENO5-z`) allow spurious corner twisting in the composite spiral wave to persist or grow under refinement, producing larger discrepancy against the monotone entropy reference than more dissipative schemes.
+- **Equation & Domain:** Nonconvex scalar conservation law $u_t + (\sin u)_x + (\cos u)_y = 0$ on $(-2.5, 2.5)^2$, $T = 1.0$, $\mathrm{CFL} = 0.45$, global Rusanov flux ($\alpha = 1$), default grids $N \in \{100, 200, 400, 800\}$ against a $1600^2$ 1st-order monotone Rusanov reference.
+- **Setup:** $u_0 = \frac{7\pi}{2}$ inside $\{x^2+y^2 \le 1\}$ (exact disk–cell area fractions), $u_0 = \frac{\pi}{4}$ outside and on all boundaries.
+- **Variants:** `1st-Order`, `TVD-minmod`, `ENO2`, `ENO3`, `WENO3-z`, `WENO5-z`.
+- **What it tests:** Nonconvex composite-wave entropy stability. Because $\sin u$ and $\cos u$ change convexity across $[\pi/4, 7\pi/2]$, low-dissipation dimension-by-dimension high-order reconstructions (`ENO3`, `WENO3-z`, `WENO5-z`) allow spurious composite-wave corner twisting to persist under refinement, producing larger discrepancy against the monotone entropy reference than `TVD-minmod` and `ENO2`.
 
 <details>
-<summary>Representative L¹ discrepancy vs. 1600² monotone Rusanov reference</summary>
+<summary>4-rank MPI L¹ discrepancy on 100² → 400² vs. 800² monotone Rusanov reference</summary>
 
-| Scheme | $100^2$ | $200^2$ | $400^2$ | $800^2$ | Bounds at $800^2$ |
-|---|---:|---:|---:|---:|---|
-| `1st-Order` | `4.05` | `2.25` | `1.13` | `0.431` | `[0.785398, 10.9956]` |
-| `TVD-minmod` | `1.43` | `0.667` | `0.246` | `0.280` | `[0.785398, 10.9956]` |
-| `ENO3` | `1.76` | `0.977` | `0.554` | `0.534` | `[0.785398, 10.9956]` |
-| `WENO5-z` | `2.22` | `1.61` | `1.31` | `1.26` | `[0.785394, 10.9956]` |
+| Scheme | $100^2$ | $200^2$ | $400^2$ | Bounds at $400^2$ | Time ($400^2$, s) |
+|---|---:|---:|---:|---|---:|
+| `1st-Order` | `3.67` | `1.84` | `0.704` | `[0.785398, 10.9956]` | `0.891` |
+| `TVD-minmod` | `1.16` | `0.481` | `0.451` | `[0.785398, 10.9956]` | `1.268` |
+| `ENO2` | `1.16` | `0.481` | `0.451` | `[0.785398, 10.9956]` | `1.317` |
+| `ENO3` | `1.71` | `1.08` | `0.897` | `[0.785398, 10.9956]` | `2.721` |
+| `WENO3-z` | `1.79` | `1.14` | `0.897` | `[0.781279, 10.9998]` | `2.940` |
+| `WENO5-z` | `2.27` | `1.82` | `1.68` | `[0.785382, 10.9956]` | `5.549` |
 
 </details>
 
@@ -143,35 +139,33 @@ Smooth formal convergence orders (2nd-order `TVD`, 3rd-order `ENO3`, 5th-order s
 
 ## CLI Usage & Outputs
 
-Each executable runs all 4 canonical variants by default and accepts serial (`./build/problemX`) or MPI (`mpiexec -n 4 ./build_mpi/problemX`) execution:
+Each executable runs all 6 canonical schemes by default and accepts serial (`./build/problemX`) or MPI (`mpiexec -n 4 ./build_mpi/problemX`) execution:
 
 ```bash
 ./build/problem1                                    # Diagonal band across 40..320 grids
-./build/problem2 --mesh nested                      # Nested 1-to-4 smoothed Delaunay hierarchy
-./build/problem2 --mesh irregular                   # Unsmoothed irregular Delaunay hierarchy
+./build/problem2                                    # Smooth solid-body rotation across 40..320 grids
 ./build/problem3                                    # KPP 100..800 vs 1600^2 monotone reference
-mpiexec -n 4 ./build_mpi/problem3 --ref 800         # Faster MPI run using an 800^2 reference
+mpiexec -n 4 ./build_mpi/problem3 --grids 100,200,400 --ref 800
 ```
 
 ### Runtime Flags
-- **All drivers:** `--scheme first|tvd|eno|weno|all` (default `all`), `--cfl <val>` (default `0.45`), `--t <t_end>`, `--out <dir>`
+- **All drivers:** `--scheme first|tvd|eno2|eno3|eno|weno3|weno5|weno|all` (default `all`), `--cfl <val>` (default `0.45`), `--t <t_end>`, `--out <dir>`
 - **`problem1`:** `--w <half_width>` (default `0.2`), `--grids <n1,n2,...>` (default `40,80,160,320`)
-- **`problem2`:** `--mesh nested|irregular` (default `nested`), `--tri-jitter <0..0.45>`, `--tri-smooth <iters>`, `--refs <r0,r1,...>` (default `0,1,2,3`)
+- **`problem2`:** `--sigma <val>` (default `0.06`), `--k <wavenumber>` (default `6*pi`), `--grids <n1,n2,...>` (default `40,80,160,320`)
 - **`problem3`:** `--grids <n1,n2,...>` (default `100,200,400,800`), `--ref <N>` (`0` disables reference solve; default `1600`)
 
 ### Generated Output Files
 Results are written under `output/problem{1,2,3}/` (gitignored by default):
-- `convergence.csv` (and `convergence_irregular.csv` for Problem 2 `--mesh irregular`): cell counts, mesh sizes, $L^1 / L^2 / L^\infty$ errors and EOCs, conservation drift, and runtimes.
-- 1D slice/profile CSVs: normal profiles in `output/problem1/profile_*.csv`; streamwise ($y=0.5$) and cross-stream ($x=2.75$) slices in `output/problem2/slice_*.csv`.
-- ParaView time series (`solution.pvd` referencing `.vti` or `.vtu` snapshots) for the finest mesh level of each solver variant. Open any `solution.pvd` directly in ParaView to inspect time evolution.
+- `convergence.csv`: cell counts, mesh sizes, $L^1 / L^2 / L^\infty$ errors and EOCs, conservation drift, and runtimes.
+- 1D slice/profile CSVs: normal profiles in `output/problem1/profile_*.csv`; horizontal slices at $y \approx 0.70$ in `output/problem2/profile_*.csv`.
+- ParaView time series (`solution.pvd` referencing `.vti` snapshots) for the finest mesh level of each solver variant.
 
 ---
 
 ## MPI Parallelism
 
 Distributed execution (`USE_MPI=1` / `-DFVM_USE_MPI=ON`) is implemented in [include/fvm/core/mpi_context.hpp](include/fvm/core/mpi_context.hpp):
-- **Structured grids (`CartDecomp2D`):** 2D Cartesian process grid with sequential X-then-Y halo exchanges so diagonal ghost corners required by 2D ENO3/WENO5 stencils are populated automatically across rank boundaries and periodic wraps. Rank 0 gathers full fields for profile extraction and `.vti` export.
-- **Unstructured meshes (`UnstructuredDecomp`):** Centroid-sorted owner-computes partition along $x$ with precomputed `MPI_Alltoallv` communication schedules for 2-ring scalar values and 1-ring reconstructed polynomials, avoiding redundant least-squares QR factorizations and $P^2$ reconstructions on remote cells.
+- **Structured grids (`CartDecomp2D`):** 2D Cartesian process grid with sequential X-then-Y halo exchanges so diagonal ghost corners required by 2D `ENO3`/`WENO3`/`WENO5` stencils are populated automatically across rank boundaries and periodic wraps. Rank 0 gathers full fields for profile extraction and `.vti` export.
 
 ---
 
@@ -182,16 +176,15 @@ Distributed execution (`USE_MPI=1` / `-DFVM_USE_MPI=ON`) is implemented in [incl
 ├── CMakeLists.txt
 ├── Makefile
 ├── apps/
-│   ├── problem1_diagonal_band.cpp      # Problem 1 driver (structured diagonal band)
-│   ├── problem2_unstructured_tube.cpp  # Problem 2 driver (unstructured tube patch)
+│   ├── problem1_diagonal_band.cpp      # Problem 1 driver (oblique contact discontinuity)
+│   ├── problem2_smooth_rotation.cpp    # Problem 2 driver (smooth solid-body wave-packet rotation)
 │   └── problem3_kpp.cpp                # Problem 3 driver (KPP nonconvex rotating wave)
 ├── include/fvm/
 │   ├── core/                           # Types, ghost-aware fields, convergence tools, MPI context
-│   ├── io/                             # ParaView .vti / .vtu / .pvd writers
-│   ├── linalg/                         # Dense LU / Householder QR and sparse CSR CG / BiCGSTAB
-│   ├── mesh/                           # Exact clipping geometry, structured/unstructured meshes, Bowyer-Watson generator
-│   ├── numerics/                       # 1D/2D Gauss quadrature, SSP-RK integrators, upwind & Rusanov fluxes
-│   └── solvers/                        # StructuredFVSolver & UnstructuredAdvectionSolver
+│   ├── io/                             # ParaView .vti / .pvd writers
+│   ├── mesh/                           # Exact clipping geometry, structured mesh & BCs
+│   ├── numerics/                       # 1D Gauss quadrature, RK integrators, upwind & Rusanov fluxes
+│   └── solvers/                        # StructuredFVSolver (1st, TVD, ENO2/3, WENO3/5)
 ├── src/                                # Library implementations matching include/fvm/
 └── tests/
     ├── test_core.cpp                   # Core infrastructure unit tests

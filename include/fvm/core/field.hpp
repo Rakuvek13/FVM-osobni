@@ -128,43 +128,4 @@ inline ErrorNorms compute_error_norms(const StructuredField2D& num,
     return e;
 }
 
-inline ErrorNorms compute_error_norms(const std::vector<Real>& num,
-                                      const std::vector<Real>& ref,
-                                      const std::vector<Real>& cell_areas) {
-    if (num.size() != ref.size() || num.size() != cell_areas.size()) {
-        throw std::invalid_argument("Vector size mismatch in compute_error_norms");
-    }
-    ErrorNorms e;
-    Real sum_l1 = 0.0;
-    Real sum_l2 = 0.0;
-    for (Index i = 0; i < num.size(); ++i) {
-        const Real diff = std::abs(num[i] - ref[i]);
-        sum_l1 += cell_areas[i] * diff;
-        sum_l2 += cell_areas[i] * diff * diff;
-        e.linf = std::max(e.linf, diff);
-    }
-    e.l1 = sum_l1;
-    e.l2 = std::sqrt(sum_l2);
-    return e;
-}
-
-inline FieldStats compute_field_stats(const std::vector<Real>& u,
-                                      const std::vector<Real>& cell_areas) {
-    if (u.size() != cell_areas.size()) {
-        throw std::invalid_argument("Vector size mismatch in compute_field_stats");
-    }
-    FieldStats stats;
-    if (u.empty()) {
-        return stats;
-    }
-    stats.min_val = std::numeric_limits<Real>::infinity();
-    stats.max_val = -std::numeric_limits<Real>::infinity();
-    for (Index i = 0; i < u.size(); ++i) {
-        stats.min_val = std::min(stats.min_val, u[i]);
-        stats.max_val = std::max(stats.max_val, u[i]);
-        stats.total_mass += u[i] * cell_areas[i];
-    }
-    return stats;
-}
-
 }  // namespace fvm
